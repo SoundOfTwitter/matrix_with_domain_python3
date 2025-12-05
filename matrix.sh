@@ -75,14 +75,13 @@ sudo python3 -m venv /opt/synapse/env
 # 4. 升级 pip 并安装 Synapse 及其所需的 PostgreSQL 驱动
 # 定义要尝试的镜像源列表
 MIRRORS=(
+    "https://pypi.org/simple/"                   # 官方 PyPI 源 (国际)
     "https://pypi.tuna.tsinghua.edu.cn/simple/"  # 清华大学 (TUNA)
     "https://mirrors.aliyun.com/pypi/simple/"    # 阿里云
     "https://pypi.mirrors.ustc.edu.cn/simple/"   # 中科大 (USTC)
     "https://pypi.baidu.com/simple/"
     "https://mirrors.cloud.tencent.com/pypi/simple/"
     "https://repo.huaweicloud.com/repository/pypi/simple/"
-    "http://pypi.douban.com/simple/"
-    "https://pypi.org/simple/"                   # 官方 PyPI 源 (国际)
 )
 
 SUCCESS=0
