@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 脚本需要在拥有完整 sudo 权限的非 root 用户下运行。
+# 脚本需要在拥有完整 sudo 权限的admin用户下运行。
 
 # --- 1. 变量输入与生成 ---
 read -p "请输入 域名 (例如: matrix.yourdomain.com): " server_domain
