@@ -1,34 +1,39 @@
 #!/bin/bash
 
+# 脚本需要在拥有完整 sudo 权限的非 root 用户下运行。
+
 # --- 1. 变量输入与生成 ---
 read -p "请输入 域名 (例如: matrix.yourdomain.com): " server_domain
 read -p "请输入 IP: " server_IP
 read -p "请输入 在Google申请的网站密钥 (reCAPTCHA Site Key): " google_webkey
 read -p "请输入 在Google申请的密钥 (reCAPTCHA Secret Key): " google_key
 
-# 自动生成安全的随机密码
+# 自动生成安全的随机密码 (使用 sudo 执行 tee 写入 /home，确保权限)
+# 因为 /dev/urandom 不需要 root 权限，所以生成操作可以不变
 passwd_matrix=$(< /dev/urandom tr -dc 'A-Za-z0-9' | head -c 26)
 passwd_psycopg2=$(< /dev/urandom tr -dc 'A-Za-z0-9' | head -c 26)
 passwd_turnserver=$(< /dev/urandom tr -dc 'A-Za-z0-9' | head -c 26)
 
-echo "$server_domain" > /home/domain.txt
+# 将域名写入 /home，如果 /home/domain.txt 不存在，则需要 sudo 权限
+echo "$server_domain" | sudo tee /home/domain.txt > /dev/null
 echo "域名已写入 /home/domain.txt"
 
 # --- 2. 基础环境与 Coturn 安装 (包含编译 psycopg2 所需的依赖) ---
 echo "--- 安装基础工具和 Coturn ---"
-apt update
-apt install -y lsb-release wget apt-transport-https coturn python3-venv build-essential python3-dev libffi-dev libssl-dev libjpeg-dev libpq-dev
+sudo apt update
+sudo apt install -y lsb-release wget apt-transport-https coturn python3-venv build-essential python3-dev libffi-dev libssl-dev libjpeg-dev libpq-dev
 sleep 2
 
 # --- 3. PostgreSQL 数据库安装与配置 ---
 echo "--- 安装与配置 PostgreSQL ---"
-apt install -y postgresql postgresql-contrib
-systemctl enable postgresql
-systemctl start postgresql
+sudo apt install -y postgresql postgresql-contrib
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
 
 # 切换到postgres系统用户并添加synapse数据库、新建用户synapse_user
-su - postgres << EOF
-psql << SQL
+# 注意：使用 sudo -u postgres 执行 psql 命令
+echo "正在创建 PostgreSQL 数据库和用户..."
+sudo -u postgres psql << SQL
 -- Create the database with specified parameters
 CREATE DATABASE synapse ENCODING 'UTF8' LC_COLLATE='C' LC_CTYPE='C' template=template0;
 -- Create the user with the generated secure password
@@ -39,7 +44,6 @@ ALTER DATABASE synapse OWNER TO synapse_user;
 GRANT ALL PRIVILEGES ON DATABASE synapse TO synapse_user;
 \q
 SQL
-EOF
 sleep 10
 
 
@@ -52,23 +56,24 @@ echo "--- 配置 Synapse Python 虚拟环境 ---"
 echo "正在创建 synapse 系统用户和组..."
 # 确保 synapse 组存在
 if ! getent group synapse > /dev/null; then
-    groupadd --system synapse
+    sudo groupadd --system synapse
 fi
 # 创建 synapse 用户 (如果已存在则跳过)
-adduser --system --no-create-home --ingroup synapse synapse
+sudo adduser --system --no-create-home --ingroup synapse synapse
 
 # 2. 确保安装和数据目录存在
-mkdir -p /opt/synapse
-mkdir -p /etc/matrix-synapse
-mkdir -p /var/lib/matrix-synapse
-mkdir -p /var/log/matrix-synapse
+sudo mkdir -p /opt/synapse
+sudo mkdir -p /etc/matrix-synapse
+sudo mkdir -p /var/lib/matrix-synapse
+sudo mkdir -p /var/log/matrix-synapse
 
-# 3. 创建和激活虚拟环境
-python3 -m venv /opt/synapse/env
-source /opt/synapse/env/bin/activate
+# 3. 创建和激活虚拟环境 (创建 VENV 需要 root/sudo 权限来写入 /opt/synapse)
+sudo python3 -m venv /opt/synapse/env
+# 因为后续的 pip 安装需要在虚拟环境中执行，我们不能直接使用 source。
+# 所有的虚拟环境命令都需要使用其完整路径 /opt/synapse/env/bin/...
 
 # 4. 升级 pip 并安装 Synapse 及其所需的 PostgreSQL 驱动
-# 定义要尝试的镜像源列表 (国内优先，国际作为最终 fallback)
+# 定义要尝试的镜像源列表
 MIRRORS=(
     "https://pypi.tuna.tsinghua.edu.cn/simple/"  # 清华大学 (TUNA)
     "https://mirrors.aliyun.com/pypi/simple/"    # 阿里云
@@ -76,28 +81,27 @@ MIRRORS=(
     "https://pypi.baidu.com/simple/"
     "https://mirrors.cloud.tencent.com/pypi/simple/"
     "https://repo.huaweicloud.com/repository/pypi/simple/"
-    "http://pypi.douban.com/simple/" 
+    "http://pypi.douban.com/simple/"
     "https://pypi.org/simple/"                   # 官方 PyPI 源 (国际)
 )
 
 SUCCESS=0
 
-/opt/synapse/env/bin/pip install --upgrade pip
+# 升级 pip
+sudo /opt/synapse/env/bin/pip install --upgrade pip
 
 echo "--- 尝试使用多个 PyPI 镜像源安装 Synapse ---"
 for MIRROR in "${MIRRORS[@]}"; do
     echo "--- 正在尝试使用镜像源: $MIRROR ---"
-    
-    # 尝试安装，并捕获返回值 $?
-    /opt/synapse/env/bin/pip install -i "$MIRROR" matrix-synapse[postgres]
+    # 尝试安装
+    sudo /opt/synapse/env/bin/pip install -i "$MIRROR" matrix-synapse[postgres]
     
     if [ $? -eq 0 ]; then
         echo "✅ 安装成功！使用源: $MIRROR"
         SUCCESS=1
         break # 安装成功，跳出循环
     else
-        echo "❌ 使用源 $MIRROR 失败 (可能是网络或依赖冲突)，尝试下一个..."
-        # 依赖冲突可能仍然存在，但至少我们尝试了所有网络路径
+        echo "❌ 使用源 $MIRROR 失败，尝试下一个..."
     fi
 done
 
@@ -107,9 +111,9 @@ if [ $SUCCESS -eq 0 ]; then
     exit 1 # 如果所有尝试都失败，则终止脚本
 fi
 
-# 5. 生成初始配置 (由 root 运行 VENV 命令，生成的文件默认属于 root)
+# 5. 生成初始配置 (由 root/sudo 运行 VENV 命令)
 echo "--- 生成 homeserver.yaml 初始配置 ---"
-/opt/synapse/env/bin/python -m synapse.app.homeserver \
+sudo /opt/synapse/env/bin/python -m synapse.app.homeserver \
     --server-name "$server_domain" \
     --config-path /etc/matrix-synapse/homeserver.yaml \
     --generate-config \
@@ -117,19 +121,18 @@ echo "--- 生成 homeserver.yaml 初始配置 ---"
     
 # 6. 设置正确的权限 (现在 synapse:synapse 应该有效了)
 echo "正在设置 synapse 用户权限..."
-chown -R synapse:synapse /opt/synapse
-chown -R synapse:synapse /etc/matrix-synapse
-chown -R synapse:synapse /var/lib/matrix-synapse
-chown -R synapse:synapse /var/log/matrix-synapse
+sudo chown -R synapse:synapse /opt/synapse
+sudo chown -R synapse:synapse /etc/matrix-synapse
+sudo chown -R synapse:synapse /var/lib/matrix-synapse
+sudo chown -R synapse:synapse /var/log/matrix-synapse
 
-# 退出虚拟环境
-deactivate
 sleep 5
 
 
 # --- 5. 配置 /etc/matrix-synapse/homeserver.yaml ---
 echo "--- 写入自定义 homeserver.yaml 配置 ---"
-cat << EOF > /etc/matrix-synapse/homeserver.yaml
+# 使用 sudo tee 写入 /etc 目录下的文件
+cat << EOF | sudo tee /etc/matrix-synapse/homeserver.yaml > /dev/null
 server_name: "$server_domain"
 public_baseurl: "https://$server_domain/"
 pid_file: "/var/run/matrix-synapse.pid"
@@ -157,7 +160,7 @@ log_config: "/etc/matrix-synapse/log.yaml"
 # 明确设置统计报告选项以避免启动错误
 report_stats: False
 media_store_path: /var/lib/matrix-synapse/media
-signing_key_path: "/etc/matrix-synapse/homeserver.signing.key" # 保持默认，在初始生成时已创建
+signing_key_path: "/etc/matrix-synapse/homeserver.signing.key"
 trusted_key_servers:
   - server_name: "matrix.org"
 max_avatar_size: 10M
@@ -167,8 +170,6 @@ password_config:
 registration_shared_secret: "$passwd_matrix"
 enable_registration: true
 enable_registration_captcha: true
-# 无需电子邮件或 recaptcha 验证即可注册（其实不推荐）
-# enable_registration_without_verification: true
 
 # 填入你在 Google 申请的 Site Key (网站密钥)
 recaptcha_public_key: "$google_webkey"
@@ -189,21 +190,21 @@ turn_shared_secret: "$passwd_turnserver"
 
 # 动态密码有效期 (毫秒)
 turn_user_lifetime: 86400000 # 24 小时
-
 EOF
 
 # 重新应用正确的权限给配置
-chown -R synapse:synapse /etc/matrix-synapse
-chown -R synapse:synapse /var/lib/matrix-synapse
-chown synapse:synapse /etc/matrix-synapse/homeserver.signing.key
+sudo chown -R synapse:synapse /etc/matrix-synapse
+sudo chown -R synapse:synapse /var/lib/matrix-synapse
+# 单独设置关键文件的权限
+sudo chown synapse:synapse /etc/matrix-synapse/homeserver.signing.key
 if [ -f /etc/matrix-synapse/log.yaml ]; then
-    chown synapse:synapse /etc/matrix-synapse/log.yaml
+    sudo chown synapse:synapse /etc/matrix-synapse/log.yaml
 fi
 
 
 # --- 6. 配置 /etc/turnserver.conf 和 Coturn 服务 ---
 echo "--- 配置 Coturn ---"
-cat << EOF > /etc/turnserver.conf
+cat << EOF | sudo tee /etc/turnserver.conf > /dev/null
 # ... (Coturn 配置保持不变) ...
 # 监听地址 (通常是服务器的公共 IP 或 0.0.0.0)
 listening-ip=0.0.0.0
@@ -230,19 +231,19 @@ turns-port=3478
 # -------------------------------------------------------------------------
 EOF
 
-systemctl enable coturn
-systemctl restart coturn
+sudo systemctl enable coturn
+sudo systemctl restart coturn
 
 
 # --- 7. Nginx 与 Let's Encrypt 证书配置 (保持不变) ---
 echo "--- 配置 Nginx 和 Let's Encrypt ---"
-apt install -y nginx
+sudo apt install -y nginx
 
 # 创建用于certbot验证的目录
-mkdir -p /var/www/certbot
+sudo mkdir -p /var/www/certbot
 
 # 先配置一个临时的nginx服务器块用于获取证书
-cat << EOF > /etc/nginx/sites-available/matrix-temp
+cat << EOF | sudo tee /etc/nginx/sites-available/matrix-temp > /dev/null
 server {
     listen 80;
     server_name $server_domain;
@@ -257,18 +258,19 @@ server {
 }
 EOF
 
-ln -sf /etc/nginx/sites-available/matrix-temp /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-systemctl restart nginx
+sudo ln -sf /etc/nginx/sites-available/matrix-temp /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo systemctl restart nginx
 
 # 安装certbot并使用webroot方式获取证书
-apt install -y certbot python3-certbot-nginx
+sudo apt install -y certbot python3-certbot-nginx
 
 # 使用webroot方式获取初始证书
-certbot certonly --webroot -w /var/www/certbot -d $server_domain --email liuxt2@hku-szh.org --agree-tos --non-interactive
+# 注意：你需要手动替换一个有效的 email 地址。我保留了你原始脚本中的地址。
+sudo certbot certonly --webroot -w /var/www/certbot -d $server_domain --email liuxt2@hku-szh.org --agree-tos --non-interactive
 
 # 配置 Nginx 正式代理
-cat << EOF > /etc/nginx/sites-available/matrix
+cat << EOF | sudo tee /etc/nginx/sites-available/matrix > /dev/null
 # ... (Nginx 配置保持不变) ...
 server {
     listen 80;
@@ -314,19 +316,22 @@ server {
 }
 EOF
 
-ln -sf /etc/nginx/sites-available/matrix /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/matrix-temp
-systemctl reload nginx
+sudo ln -sf /etc/nginx/sites-available/matrix /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/matrix-temp
+sudo systemctl reload nginx
 
 echo "--- 配置证书自动续期 ---"
-certbot renew --dry-run
-(crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet --post-hook \"systemctl reload nginx\"") | crontab -
+sudo certbot renew --dry-run
+# 使用 crontab -l | cat 命令来确保非 root 用户可以读取自己的 crontab，然后使用 sudo tee 写入 root 的 crontab 文件
+# 或者直接使用带 sudo 的 crontab -e，但这里使用 -l 和 tee 组合更适合脚本自动化
+(sudo crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet --post-hook \"systemctl reload nginx\"") | sudo crontab -
 
 # --- 8. 创建 Systemd 服务文件 (使用 synapse 用户) ---
 echo "--- 创建 systemd 服务文件 ---"
-cat << EOF > /etc/systemd/system/matrix-synapse.service
+cat << EOF | sudo tee /etc/systemd/system/matrix-synapse.service > /dev/null
 [Unit]
 Description=Matrix Synapse Homeserver (Python VENV)
+# 确保在 postgresql 和网络之后启动
 Requires=network.target postgresql.service
 After=network.target postgresql.service
 
@@ -358,21 +363,23 @@ WantedBy=multi-user.target
 EOF
 
 # 重新加载 systemd 配置
-systemctl daemon-reload
+sudo systemctl daemon-reload
 
 # 启用并启动 Synapse
-systemctl enable matrix-synapse
-systemctl start matrix-synapse
+sudo systemctl enable matrix-synapse
+sudo systemctl start matrix-synapse
 sleep 10
 
 
-# --- 9. 最终输出与重启 ---
+# --- 9. 最终输出 ---
 echo "--- 部署完成 ---"
 echo "Matrix Synapse 已通过 Python 虚拟环境安装并以 synapse 用户运行。"
+echo "请使用以下命令检查服务状态: sudo systemctl status matrix-synapse"
 echo "以下是生成的关键密码，请妥善保存："
 echo "Synapse 注册共享密钥: $passwd_matrix"
 echo "PostgreSQL 数据库密码: $passwd_psycopg2"
 echo "TURN 服务器共享密钥: $passwd_turnserver"
-echo "系统将在10秒后重启..."
-sleep 10
-reboot
+echo "--------------------------------------------------------"
+echo "✅ 注意：脚本最后一步的系统重启命令已移除。"
+echo "请手动检查所有服务状态并决定是否重启系统。"
+echo "--------------------------------------------------------"
