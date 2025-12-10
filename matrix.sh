@@ -14,9 +14,9 @@ passwd_matrix=$(< /dev/urandom tr -dc 'A-Za-z0-9' | head -c 26)
 passwd_psycopg2=$(< /dev/urandom tr -dc 'A-Za-z0-9' | head -c 26)
 passwd_turnserver=$(< /dev/urandom tr -dc 'A-Za-z0-9' | head -c 26)
 
-# 将域名写入 /home，如果 /home/domain.txt 不存在，则需要 sudo 权限
-echo "$server_domain" | sudo tee /home/domain.txt > /dev/null
-echo "域名已写入 /home/domain.txt"
+# 将域名写入 /home，如果 /home/admin/domain.txt 不存在，则需要 sudo 权限
+echo "$server_domain" | sudo tee /home/admin/domain.txt > /dev/null
+echo "域名已写入 /home/admin/domain.txt"
 
 # --- 2. 基础环境与 Coturn 安装 (包含编译 psycopg2 所需的依赖) ---
 echo "--- 安装基础工具和 Coturn ---"
