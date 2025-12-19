@@ -168,7 +168,11 @@ password_config:
   enabled: true
 registration_shared_secret: "$passwd_matrix"
 enable_registration: true
-enable_registration_captcha: true
+registrations_require_3pid:
+  - email  # 这行表示注册时必须通过邮件验证
+# 如果你只想要邮件验证，确保这里逻辑正确
+enable_registration_without_verification: false
+# enable_registration_captcha: true
 
 # 填入你在 Google 申请的 Site Key (网站密钥)
 recaptcha_public_key: "$google_webkey"
