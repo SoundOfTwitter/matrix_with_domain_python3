@@ -5,7 +5,7 @@
 # --- 1. 变量输入与生成 ---
 read -p "请输入 域名 (例如: matrix.yourdomain.com): " server_domain
 read -p "请输入 IP: " server_IP
-read -p "请输入 系统邮箱(gmail): " server_email
+read -p "请输入 完整的系统邮箱(gmail): " server_email
 read -p "请输入 系统邮箱的授权码: " server_email_passwd
 read -p "请输入 在Google申请的网站密钥 (reCAPTCHA Site Key): " google_webkey
 read -p "请输入 在Google申请的密钥 (reCAPTCHA Secret Key): " google_key
