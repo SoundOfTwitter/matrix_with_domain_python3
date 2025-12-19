@@ -242,7 +242,7 @@ external-ip=$server_IP
 
 # use-auth-secret 是关键，它允许 Synapse 动态生成用户名和密码
 use-auth-secret
-static-auth-secret=$passwd_turnserver    # 必须与 homeserver.yaml 中的 turn_shared_secret 相同！
+static-auth-secret=$passwd_turnserver
 realm=$server_domain
 
 # 转发端口范围 (用于媒体流中继，范围越大越好)
