@@ -189,6 +189,8 @@ recaptcha_siteverify_api: "https://www.google.com/recaptcha/api/siteverify"
 turn_uris:
     - "turn:$server_domain:3478?transport=udp"
     - "turn:$server_domain:3478?transport=tcp"
+    - "turns:$server_domain:5349?transport=udp"
+    - "turns:$server_domain:5349?transport=tcp"
 
 # 【关键】必须与 coturn 配置中的 static-auth-secret 保持一致！
 turn_shared_secret: "$passwd_turnserver"
@@ -228,10 +230,10 @@ cat << EOF | sudo tee /etc/turnserver.conf > /dev/null
 # ... (Coturn 配置保持不变) ...
 # 监听地址 (通常是服务器的公共 IP 或 0.0.0.0)
 listening-ip=0.0.0.0
-
 # 监听端口
 listening-port=3478
-
+# 增加 TLS 监听 (处理严格防火墙)
+tls-listening-port=5349
 # 外部 IP (如果服务器有多个 IP，请指定公网 IP)
 external-ip=$server_IP
 
@@ -243,12 +245,14 @@ realm=$server_domain
 # 转发端口范围 (用于媒体流中继，范围越大越好)
 min-port=49152
 max-port=65535
-
-# 启用 STUN 和 TURN 服务
-stuns-port=3478
-turns-port=3478
-
-# -------------------------------------------------------------------------
+# 证书配置 (关键：开启加密中继)
+cert=/etc/coturn/certs/fullchain.pem
+pkey=/etc/coturn/certs/privkey.pem
+# 安全与性能优化
+no-stdout-log
+log-file=/var/log/turnserver.log
+no-loopback-peers
+no-multicast-peers
 EOF
 
 sudo systemctl enable coturn
@@ -288,6 +292,21 @@ sudo apt install -y certbot python3-certbot-nginx
 # 使用webroot方式获取初始证书
 # 注意：你需要手动替换一个有效的 email 地址。我保留了你原始脚本中的地址。
 sudo certbot certonly --webroot -w /var/www/certbot -d $server_domain --email liuxt2@hku-szh.org --agree-tos --non-interactive
+
+# 在获取证书后添加
+sudo mkdir -p /etc/coturn/certs
+sudo chown -R turnserver:turnserver /etc/coturn
+# 创建一个同步钩子脚本，确保续期后证书也能更新
+cat << EOF | sudo tee /etc/letsencrypt/renewal-hooks/deploy/coturn.sh > /dev/null
+#!/bin/bash
+cp /etc/letsencrypt/live/$server_domain/fullchain.pem /etc/coturn/certs/
+cp /etc/letsencrypt/live/$server_domain/privkey.pem /etc/coturn/certs/
+chown -R turnserver:turnserver /etc/coturn/certs
+systemctl restart coturn
+EOF
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/coturn.sh
+# 立即手动执行一次同步
+sudo /etc/letsencrypt/renewal-hooks/deploy/coturn.sh
 
 # 配置 Nginx 正式代理
 cat << EOF | sudo tee /etc/nginx/sites-available/matrix > /dev/null
