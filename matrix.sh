@@ -165,7 +165,10 @@ signing_key_path: "/etc/matrix-synapse/homeserver.signing.key"
 trusted_key_servers:
   - server_name: "matrix.org"
 max_avatar_size: 10M
-max_upload_size: 500M
+max_upload_size: 50M
+# 自动清理媒体缓存
+media_retention_period: 7d  # 仅保留最近 7 天的媒体文件，过期的会被物理删除
+remote_media_cache_ttl: 5d   # 远程服务器（联盟）的缓存仅保留 5 天
 password_config:
   enabled: true
 registration_shared_secret: "$passwd_matrix"
