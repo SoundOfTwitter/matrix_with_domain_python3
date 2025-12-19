@@ -5,6 +5,8 @@
 # --- 1. 变量输入与生成 ---
 read -p "请输入 域名 (例如: matrix.yourdomain.com): " server_domain
 read -p "请输入 IP: " server_IP
+read -p "请输入 系统邮箱(gmail): " server_email
+read -p "请输入 系统邮箱的授权码: " server_email_passwd
 read -p "请输入 在Google申请的网站密钥 (reCAPTCHA Site Key): " google_webkey
 read -p "请输入 在Google申请的密钥 (reCAPTCHA Secret Key): " google_key
 
@@ -190,9 +192,24 @@ turn_uris:
 
 # 【关键】必须与 coturn 配置中的 static-auth-secret 保持一致！
 turn_shared_secret: "$passwd_turnserver"
-
 # 动态密码有效期 (毫秒)
 turn_user_lifetime: 86400000 # 24 小时
+email:
+  # 启用邮件功能
+  enable_notifs: true
+  enable_password_resets: true # 开启找回密码
+  # SMTP 服务器设置 (gmail邮箱)
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 465
+  smtp_user: "$server_email"
+  # 注意：这里的密码必须是 gmail邮箱设置里开启 SMTP 后生成的“授权码”
+  smtp_pass: "$server_email_passwd"
+  # 是否使用 TLS (465端口对应 true, 587端口对应 false 并开启 require_transport_security)
+  force_tls: true
+  # 发件人显示名称和地址
+  notif_from: "Matrix Server <$server_email>"
+  # 邮件模板中显示的服务器名称
+  client_base_url: "https://$server_domain"
 EOF
 
 # 重新应用正确的权限给配置
